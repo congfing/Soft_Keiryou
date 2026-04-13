@@ -63,8 +63,18 @@
     border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #1a6eb5;
     flex-shrink: 0; outline: none; }
   .prop-order-input:focus { border-color: #1a6eb5; }
-  .prop-seq-num { width: 40px; min-width: 40px; text-align: center; font-size: 15px; font-weight: bold;
+  .prop-seq-num { width: 30px; min-width: 30px; text-align: center; font-size: 15px; font-weight: bold;
     color: #1a6eb5; flex-shrink: 0; }
+  .drag-handle { color: #bbb; font-size: 20px; cursor: grab; padding: 0 6px; user-select: none;
+    touch-action: none; flex-shrink: 0; line-height: 1; border: none; background: none; }
+  .drag-handle:active { cursor: grabbing; color: #888; }
+  .prop-card.drag-dragging { opacity: 0.35; }
+  .prop-card.drag-over-top { border-top: 3px solid #1a6eb5; }
+  .prop-card.drag-over-bottom { border-bottom: 3px solid #1a6eb5; }
+  #drag-ghost { position: fixed; z-index: 9999; pointer-events: none; background: white;
+    border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.25); padding: 10px 14px;
+    font-size: 15px; font-weight: 600; color: #333; display: none; max-width: 320px;
+    border: 2px solid #1a6eb5; }
   .prop-info { flex: 1; min-width: 0; overflow: hidden; }
   .prop-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .prop-days { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
@@ -401,7 +411,8 @@ let state = {
   date:'', dayName:'', selectedStaff:'',
   currentPropertyIndex:-1,
   entryData:{}, entryOrder:[],
-  currentScreen:1, prevScreen:1
+  currentScreen:1, prevScreen:1,
+  customOrder: null  // drag-reordered list of property names; null = use default sort
 };
 
 // ===== INIT =====
@@ -498,7 +509,7 @@ function removeStaff(name,e){
 // ===== SCREEN 2→3 =====
 function goToScreen3(){
   if(!state.selectedStaff){alert('担当者を選択してください');return;}
-  state.entryData={};state.entryOrder=[];
+  state.entryData={};state.entryOrder=[];state.customOrder=null;
   document.getElementById('propCount').textContent=allProperties.length+'件';
   document.getElementById('screen3sub').textContent=`担当：${state.selectedStaff}`;
   renderPropertyList();showScreen(3);
@@ -521,15 +532,25 @@ function renderPropertyList(){
   const c=document.getElementById('propertyList'); c.innerHTML='';
   const hint=document.getElementById('sortHint');
   const banner=document.getElementById('saveOrderBanner');
-  const baseProps=getSortedProps();
 
-  // Entry order first, then remaining
-  const entered=state.entryOrder.map(n=>baseProps.find(p=>p.name===n)).filter(Boolean);
-  const remaining=baseProps.filter(p=>!state.entryOrder.includes(p.name));
-  const displayList=[...entered,...remaining];
+  let displayList;
+  if(state.customOrder){
+    // Use drag-reordered list
+    displayList=state.customOrder.map(n=>allProperties.find(p=>p.name===n)).filter(Boolean);
+    const missing=allProperties.filter(p=>!state.customOrder.includes(p.name));
+    displayList=[...displayList,...missing];
+  } else {
+    const baseProps=getSortedProps();
+    const entered=state.entryOrder.map(n=>baseProps.find(p=>p.name===n)).filter(Boolean);
+    const remaining=baseProps.filter(p=>!state.entryOrder.includes(p.name));
+    displayList=[...entered,...remaining];
+  }
 
   const hasSaved=!!getSavedOrder(state.selectedStaff,state.dayName);
-  if(state.entryOrder.length>0){
+  if(state.customOrder){
+    hint.textContent='↕ ドラッグで並び替え中';
+    banner.style.display='none';
+  } else if(state.entryOrder.length>0){
     hint.textContent='✅ 入力済みが上に並んでいます';
     banner.style.display='flex';
   } else if(hasSaved){
@@ -543,12 +564,10 @@ function renderPropertyList(){
   displayList.forEach((prop,di)=>{
     const done=!!state.entryData[prop.name];
     const idx=allProperties.indexOf(prop);
-    const dispNum=state.entryOrder.includes(prop.name)
-      ?(state.entryOrder.indexOf(prop.name)+1)
-      :(prop.order||di+1);
     const div=document.createElement('div');
     div.className='prop-card'+(done?' done':'');
     div.id=`propcard_${idx}`;
+    div.dataset.propname=prop.name;
 
     // Day dots
     const dayDots=ORDERED_DAYS.map(d=>{
@@ -584,6 +603,7 @@ function renderPropertyList(){
 
     div.innerHTML=`
       <div class="prop-card-header" onclick="togglePropCard(${idx})">
+        <button class="drag-handle" ontouchstart="dragStart(event,'${prop.name.replace(/'/g,"\\'")}',this)" onmousedown="dragStart(event,'${prop.name.replace(/'/g,"\\'")}',this)">≡</button>
         <span class="prop-seq-num">${di+1}</span>
         <div class="prop-info">
           <div class="prop-name">${prop.name}</div>
@@ -912,6 +932,104 @@ function addStaffFromSettings(){
   staffList.push(name);saveJSON(LS_STAFF,staffList);inp.value='';renderSettingsStaff();
 }
 
+// ===== DRAG AND DROP =====
+const _drag = {
+  active: false, propName: null, srcEl: null,
+  ghost: null, overEl: null, startY: 0, startX: 0
+};
+
+function dragStart(e, propName, handle){
+  e.stopPropagation();
+  e.preventDefault();
+  const card = handle.closest('.prop-card');
+  const ghost = document.getElementById('drag-ghost');
+  ghost.textContent = propName;
+  ghost.style.display = 'block';
+
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  ghost.style.left = (clientX + 12) + 'px';
+  ghost.style.top  = (clientY - 20) + 'px';
+
+  _drag.active = true;
+  _drag.propName = propName;
+  _drag.srcEl = card;
+  _drag.ghost = ghost;
+  _drag.overEl = null;
+  card.classList.add('drag-dragging');
+
+  // Init customOrder if not set
+  if(!state.customOrder){
+    const c = document.getElementById('propertyList');
+    state.customOrder = [...c.querySelectorAll('.prop-card')].map(el=>el.dataset.propname);
+  }
+
+  if(e.touches){
+    document.addEventListener('touchmove', dragMove, {passive:false});
+    document.addEventListener('touchend',  dragEnd,  {once:true});
+  } else {
+    document.addEventListener('mousemove', dragMove);
+    document.addEventListener('mouseup',   dragEnd,  {once:true});
+  }
+}
+
+function dragMove(e){
+  if(!_drag.active) return;
+  e.preventDefault();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  _drag.ghost.style.left = (clientX + 12) + 'px';
+  _drag.ghost.style.top  = (clientY - 20) + 'px';
+
+  // Find card under pointer
+  _drag.ghost.style.display = 'none';
+  const el = document.elementFromPoint(clientX, clientY);
+  _drag.ghost.style.display = 'block';
+  const targetCard = el ? el.closest('.prop-card') : null;
+
+  // Clear previous highlight
+  if(_drag.overEl && _drag.overEl !== targetCard){
+    _drag.overEl.classList.remove('drag-over-top','drag-over-bottom');
+  }
+  if(targetCard && targetCard !== _drag.srcEl){
+    const rect = targetCard.getBoundingClientRect();
+    const half = rect.top + rect.height / 2;
+    targetCard.classList.remove('drag-over-top','drag-over-bottom');
+    targetCard.classList.add(clientY < half ? 'drag-over-top' : 'drag-over-bottom');
+    _drag.overEl = targetCard;
+  }
+}
+
+function dragEnd(e){
+  if(!_drag.active) return;
+  document.removeEventListener('touchmove', dragMove);
+  document.removeEventListener('mousemove', dragMove);
+
+  _drag.ghost.style.display = 'none';
+  _drag.srcEl.classList.remove('drag-dragging');
+  if(_drag.overEl){
+    _drag.overEl.classList.remove('drag-over-top','drag-over-bottom');
+    const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+    const clientY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
+    const rect = _drag.overEl.getBoundingClientRect();
+    const insertBefore = clientY < rect.top + rect.height / 2;
+
+    // Reorder customOrder
+    const order = [...state.customOrder];
+    const fromIdx = order.indexOf(_drag.propName);
+    const toName = _drag.overEl.dataset.propname;
+    let toIdx = order.indexOf(toName);
+    if(fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx){
+      order.splice(fromIdx, 1);
+      toIdx = order.indexOf(toName);
+      order.splice(insertBefore ? toIdx : toIdx + 1, 0, _drag.propName);
+      state.customOrder = order;
+      renderPropertyList();
+    }
+  }
+  _drag.active = false; _drag.propName = null; _drag.srcEl = null; _drag.overEl = null;
+}
+
 // ===== RESET PROPERTIES TO DEFAULT =====
 function resetPropertiesToDefault(){
   if(!confirm('物件リストをデフォルト（40件）に戻しますか？\n追加・変更した物件情報はすべて消えます。')) return;
@@ -960,5 +1078,6 @@ function addNewProperty(){
   alert(`「${name}」を登録しました`);
 }
 </script>
+<div id="drag-ghost"></div>
 </body>
 </html>
