@@ -63,6 +63,8 @@
     border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #1a6eb5;
     flex-shrink: 0; outline: none; }
   .prop-order-input:focus { border-color: #1a6eb5; }
+  .prop-seq-num { width: 40px; min-width: 40px; text-align: center; font-size: 15px; font-weight: bold;
+    color: #1a6eb5; flex-shrink: 0; }
   .prop-info { flex: 1; min-width: 0; overflow: hidden; }
   .prop-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .prop-days { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
@@ -582,8 +584,7 @@ function renderPropertyList(){
 
     div.innerHTML=`
       <div class="prop-card-header" onclick="togglePropCard(${idx})">
-        <input class="prop-order-input" type="number" min="1" value="${prop.order||''}" placeholder="#"
-          onclick="event.stopPropagation()" onchange="updatePropOrder(${idx},this.value)">
+        <span class="prop-seq-num">${di+1}</span>
         <div class="prop-info">
           <div class="prop-name">${prop.name}</div>
           <div class="prop-days">${dayDots}</div>
