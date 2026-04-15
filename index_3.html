@@ -799,8 +799,13 @@ function goToScreen5(){
   const sorted=getSortedProps();
   sorted.forEach(prop=>{
     const data=state.entryData[prop.name];if(!data)return;
+    let nameShown=false;
     prop.fields.forEach((f,fi)=>{
-      html+=`<tr><td>${fi===0?prop.name:''}</td><td>${f.label}</td><td>${data[f.label]!==''&&data[f.label]!==undefined?data[f.label]:'-'}</td><td>${f.unit}</td></tr>`;
+      const val=data[f.label];
+      const display=val!==''&&val!==undefined?val:'-';
+      const nameCell=nameShown?'':`<b>${prop.name}</b>`;
+      nameShown=true;
+      html+=`<tr><td style="padding:4px 6px;vertical-align:top">${nameCell}</td><td style="padding:4px 6px">${f.label}</td><td style="text-align:right;font-weight:600;padding:4px 6px">${display}</td><td style="padding:4px 6px">${f.unit}</td></tr>`;
     });
   });
   html+='</tbody></table></div>';
@@ -876,10 +881,13 @@ function renderHistory(filterDate){
     const sorted=[...allProperties].sort((a,b)=>(a.order||999)-(b.order||999));
     sorted.forEach(prop=>{
       const data=record.entryData[prop.name]; if(!data)return;
+      let nameShown=false;
       prop.fields.forEach((f,fi)=>{
         const val=data[f.label];
         if(val===''||val===undefined)return;
-        tableRows+=`<tr><td>${fi===0?prop.name:''}</td><td>${f.label}</td><td style="text-align:right;font-weight:600">${val}</td><td>${f.unit}</td></tr>`;
+        const nameCell=nameShown?'':`<b>${prop.name}</b>`;
+        nameShown=true;
+        tableRows+=`<tr><td style="padding:4px 6px;vertical-align:top">${nameCell}</td><td style="padding:4px 6px">${f.label}</td><td style="text-align:right;font-weight:600;padding:4px 6px">${val}</td><td style="padding:4px 6px">${f.unit}</td></tr>`;
       });
     });
     div.innerHTML=`
@@ -894,9 +902,12 @@ function renderHistory(filterDate){
         ${tableRows?`<table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:#f0f4f8"><th style="padding:6px;text-align:left">物件</th><th style="padding:6px;text-align:left">項目</th><th style="padding:6px;text-align:right">値</th><th style="padding:6px">単位</th></tr></thead>
           <tbody>${tableRows}</tbody></table>`:'<div style="color:#aaa;font-size:13px">データなし</div>'}
-        <div style="margin-top:10px;display:flex;gap:8px">
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" onclick="reloadHistoryEntry(${ri},event)">このデータで再入力</button>
           <button class="btn btn-danger btn-sm" onclick="deleteHistory(${ri},event)">削除</button>
+        </div>
+        <div style="margin-top:8px">
+          <button class="btn btn-success" onclick="sendHistoryByMail(${ri},event)">✉️ このデータを送信</button>
         </div>
       </div>`;
     c.appendChild(div);
@@ -1068,6 +1079,48 @@ function dragEnd(e){
     }
   }
   _drag.active = false; _drag.propName = null; _drag.srcEl = null; _drag.overEl = null;
+}
+
+// ===== SEND HISTORY BY MAIL =====
+function sendHistoryByMail(ri, event){
+  event.stopPropagation();
+  let hist = getAllHistory();
+  const filterDate = state._histFilterDate || null;
+  if(filterDate) hist = hist.filter(h => h.date === filterDate);
+  const record = hist[ri];
+  if(!record){ alert('データが見つかりません'); return; }
+
+  const d = new Date(record.date + 'T00:00:00');
+  const dayName = DAYS_JP[d.getDay()];
+
+  // Build email body
+  let body = `【計量データ】\n`;
+  body += `日付：${record.date}（${dayName}曜日）\n`;
+  body += `担当：${record.staffName}\n`;
+  body += `─────────────────\n`;
+
+  const sorted = [...allProperties].sort((a,b) => (a.order||999) - (b.order||999));
+  sorted.forEach(prop => {
+    const data = record.entryData[prop.name];
+    if(!data) return;
+    let hasVal = false;
+    prop.fields.forEach(f => {
+      if(data[f.label] !== '' && data[f.label] !== undefined) hasVal = true;
+    });
+    if(!hasVal) return;
+    body += `\n【${prop.name}】\n`;
+    prop.fields.forEach(f => {
+      const val = data[f.label];
+      if(val === '' || val === undefined) return;
+      body += `  ${f.label}：${val} ${f.unit}\n`;
+    });
+  });
+  body += `─────────────────\n`;
+
+  const to = getMailTo();
+  const subject = encodeURIComponent(`計量データ ${record.date}（${record.staffName}）`);
+  const bodyEncoded = encodeURIComponent(body);
+  window.location.href = `mailto:${to}?subject=${subject}&body=${bodyEncoded}`;
 }
 
 // ===== MAIL SETTINGS =====
