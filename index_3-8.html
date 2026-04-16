@@ -858,7 +858,6 @@ function savePropertyData(){
   state.entryOrder=state.entryOrder.filter(n=>n!==prop.name);
   state.entryOrder.push(prop.name);
   saveSession();
-  exportText();
   renderPropertyList();showScreen(3);
 }
 
