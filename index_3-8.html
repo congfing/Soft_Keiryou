@@ -166,6 +166,7 @@
     <button class="nav-tab" id="navHistory" onclick="navTo(6)">📋 履歴</button>
     <button class="nav-tab" id="navSettings" onclick="navTo(0)">⚙️ 設定</button>
     <button class="nav-tab" id="navMail" onclick="navTo(7)">✉️ メール</button>
+    <button class="nav-tab" id="navConvert" onclick="navTo(8)">🔄 変換</button>
   </div>
 </div>
 
@@ -273,6 +274,33 @@
         送信時にチェックが入っているアドレスに送信されます。<br>
         アドレスを空にするとその行は無視されます。
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Screen 8: Text → Excel 変換 -->
+<div class="screen" id="screen8">
+  <div style="padding-top:16px">
+    <div class="section-title">🔄 Excel 変換</div>
+    <div class="section-sub">履歴または保存テキストからExcelを作成します</div>
+
+    <!-- 履歴から変換 -->
+    <div class="card">
+      <div style="font-size:15px;font-weight:700;margin-bottom:12px">📅 履歴から変換</div>
+      <input type="date" id="convertDateInput" onchange="loadConvertFromHistory(this.value)" style="margin-bottom:10px">
+      <div id="convertHistResult" style="margin-top:4px"></div>
+    </div>
+
+    <!-- テキストファイルから変換（バックアップ用） -->
+    <div class="card" style="margin-top:4px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px;color:#555">📂 テキストファイルから変換（バックアップ用）</div>
+      <input type="file" id="txtFileInput" accept=".txt" style="width:100%;padding:10px;border:2px dashed #cbd5e1;border-radius:8px;font-size:14px;background:#f8fafc" onchange="loadTxtFile(event)">
+      <div id="txtPreview" style="margin-top:14px;display:none">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:#1a6eb5">📋 読み込み内容</div>
+        <div id="txtPreviewTable" style="overflow-x:auto"></div>
+        <button class="btn btn-primary" style="margin-top:14px" onclick="convertTxtToXlsx()">📥 Excelで保存（.xlsx）</button>
+      </div>
+      <div id="txtError" style="margin-top:10px;color:#dc2626;font-size:13px;display:none"></div>
     </div>
   </div>
 </div>
@@ -524,13 +552,14 @@ function updateNav(n){
   const dl=document.getElementById('headerDateLabel');
   dl.textContent=(state.date&&state.dayName)?`${state.date}（${state.dayName}曜）`:'';
   // tabs active
-  ['navDate','navStaff','navProps','navHistory','navSettings','navMail'].forEach(id=>document.getElementById(id).classList.remove('active'));
+  ['navDate','navStaff','navProps','navHistory','navSettings','navMail','navConvert'].forEach(id=>document.getElementById(id).classList.remove('active'));
   if(n===0) document.getElementById('navSettings').classList.add('active');
   else if(n===1) document.getElementById('navDate').classList.add('active');
   else if(n===2) document.getElementById('navStaff').classList.add('active');
   else if(n===3||n===4||n===5) document.getElementById('navProps').classList.add('active');
   else if(n===6) document.getElementById('navHistory').classList.add('active');
   else if(n===7){ document.getElementById('navMail').classList.add('active'); loadMailSettings(); }
+  else if(n===8) document.getElementById('navConvert').classList.add('active');
   // enabled/disabled
   document.getElementById('navStaff').className='nav-tab'+(n===2?' active':'')+(state.date?'':' disabled');
   document.getElementById('navProps').className='nav-tab'+((n===3||n===4||n===5)?' active':'')+(state.selectedStaff?'':' disabled');
@@ -558,6 +587,7 @@ function navTo(n){
   if(n===3){ renderPropertyList(); showScreen(3); return; }
   if(n===6){ renderHistory(); showScreen(6); return; }
   if(n===7){ state.prevScreen=state.currentScreen; showScreen(7); return; }
+  if(n===8){ showScreen(8); initConvertScreen(); return; }
 }
 
 // ===== SCREEN 1→2 =====
@@ -828,6 +858,7 @@ function savePropertyData(){
   state.entryOrder=state.entryOrder.filter(n=>n!==prop.name);
   state.entryOrder.push(prop.name);
   saveSession();
+  exportText();
   renderPropertyList();showScreen(3);
 }
 
@@ -924,6 +955,194 @@ function exportXlsx(){
   ws['!cols']=[{wch:20},{wch:12},{wch:10},{wch:8},{wch:14},{wch:14}];
   XLSX.utils.book_append_sheet(wb,ws,'計量データ');
   XLSX.writeFile(wb,`計量データ_${state.date.replace(/-/g,'')}_${state.selectedStaff}.xlsx`);
+}
+
+// ===== CONVERT SCREEN =====
+function initConvertScreen(){
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  const inp = document.getElementById('convertDateInput');
+  inp.value = today;
+  loadConvertFromHistory(today);
+}
+
+function loadConvertFromHistory(dateVal){
+  const resultEl = document.getElementById('convertHistResult');
+  if(!dateVal){ resultEl.innerHTML=''; return; }
+  const records = getAllHistory().filter(h=>h.date===dateVal);
+  if(records.length===0){
+    resultEl.innerHTML=`<div style="color:#888;font-size:13px;padding:6px 0">この日付の履歴はありません。<br>テキストファイルから変換してください。</div>`;
+    return;
+  }
+  // 複数担当がある場合はセレクタ表示
+  let html='';
+  if(records.length>1){
+    html+=`<div style="font-size:13px;margin-bottom:8px;color:#555">担当者を選択：</div>`;
+    html+=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">`;
+    records.forEach((r,i)=>{
+      const cnt=Object.keys(r.entryData).length;
+      html+=`<button class="btn btn-secondary btn-sm" onclick="showConvertPreview(${i})" id="convBtn_${i}">${r.staffName}（${cnt}件）</button>`;
+    });
+    html+=`</div>`;
+  }
+  html+=`<div id="convertPreviewWrap"></div>`;
+  resultEl.innerHTML=html;
+  // 1件だけなら自動表示
+  window._convertRecords=records;
+  if(records.length===1) showConvertPreview(0);
+}
+
+function showConvertPreview(idx){
+  const records=window._convertRecords||[];
+  const rec=records[idx]; if(!rec) return;
+  // ボタンのハイライト
+  records.forEach((_,i)=>{
+    const b=document.getElementById(`convBtn_${i}`);
+    if(b) b.style.background=i===idx?'#1a6eb5':''  ;
+    if(b) b.style.color=i===idx?'white':'';
+  });
+  const propNames=Object.keys(rec.entryData);
+  let html=`<div style="font-size:13px;margin-bottom:8px;color:#555">📋 ${rec.date}　${rec.staffName}　${propNames.length}件</div>`;
+  html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html+='<tr style="background:#e2e8f0"><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">物件名</th><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">項目</th><th style="padding:5px 8px;text-align:right;border:1px solid #cbd5e1">値</th><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">単位</th></tr>';
+  propNames.forEach(name=>{
+    const data=rec.entryData[name];
+    const prop=allProperties.find(p=>p.name===name);
+    if(!prop) return;
+    prop.fields.forEach((f,fi)=>{
+      const val=data[f.label]!==undefined&&data[f.label]!==''?data[f.label]:'－';
+      html+=`<tr style="background:${fi%2===0?'#fff':'#f8fafc'}">`;
+      if(fi===0) html+=`<td rowspan="${prop.fields.length}" style="padding:5px 8px;border:1px solid #e2e8f0;font-weight:700;vertical-align:top">${name}</td>`;
+      html+=`<td style="padding:5px 8px;border:1px solid #e2e8f0">${f.label}</td><td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right">${val}</td><td style="padding:5px 8px;border:1px solid #e2e8f0">${f.unit}</td></tr>`;
+    });
+  });
+  html+='</table></div>';
+  html+=`<button class="btn btn-primary" style="margin-top:12px" onclick="convertHistToXlsx(${idx})">📥 Excelで保存（.xlsx）</button>`;
+  document.getElementById('convertPreviewWrap').innerHTML=html;
+}
+
+function convertHistToXlsx(idx){
+  const records=window._convertRecords||[];
+  const rec=records[idx]; if(!rec) return;
+  const wb=XLSX.utils.book_new();
+  const rows=[['物件名','項目','値','単位','日付','担当者']];
+  Object.keys(rec.entryData).forEach(name=>{
+    const data=rec.entryData[name];
+    const prop=allProperties.find(p=>p.name===name);
+    if(!prop) return;
+    prop.fields.forEach(f=>rows.push([name,f.label,data[f.label]!==''?data[f.label]:'',f.unit,rec.date,rec.staffName]));
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:20},{wch:12},{wch:10},{wch:8},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,ws,'計量データ');
+  XLSX.writeFile(wb,`計量データ_${rec.date.replace(/-/g,'')}_${rec.staffName}.xlsx`);
+}
+
+// ===== TEXT → EXCEL 変換 =====
+let _parsedTxt = null; // {date, staff, props:[{name, fields:[{label,value,unit}]}]}
+
+function loadTxtFile(event){
+  const file = event.target.files[0];
+  const errEl = document.getElementById('txtError');
+  const prevEl = document.getElementById('txtPreview');
+  errEl.style.display='none'; prevEl.style.display='none';
+  _parsedTxt = null;
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      _parsedTxt = parseTxtData(e.target.result);
+      renderTxtPreview(_parsedTxt);
+      prevEl.style.display='block';
+    } catch(err){
+      errEl.textContent = '読み込みエラー：' + err.message;
+      errEl.style.display='block';
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function parseTxtData(text){
+  // BOM除去
+  text = text.replace(/^\uFEFF/, '');
+  const lines = text.split('\n').map(l=>l.replace(/\r$/,''));
+  let date='', staff='', props=[], curProp=null;
+
+  for(let i=0; i<lines.length; i++){
+    const line = lines[i];
+
+    // 日付行: ■ 計量データ　2026/04/16　木
+    if(line.startsWith('■')){
+      const m = line.match(/(\d{4}\/\d{2}\/\d{2})/);
+      if(m) date = m[1].replace(/\//g,'-');
+      continue;
+    }
+    // 担当行: 　担当：田中
+    if(line.match(/担当[：:]/)){
+      const m = line.match(/担当[：:](.+)/);
+      if(m) staff = m[1].trim();
+      continue;
+    }
+    // 物件行: 1．LA・MU  or 1.LA・MU
+    const propMatch = line.match(/^\d+[．.]\s*(.+)/);
+    if(propMatch){
+      curProp = { name: propMatch[1].trim(), fields: [] };
+      props.push(curProp);
+      continue;
+    }
+    // フィールド行: 　　可燃ごみ：123 kg  or 　　可燃ごみ：－ kg
+    if(curProp && line.match(/[：:]/)){
+      const m = line.match(/^\s+(.+?)[：:](.+?)\s+(\S+)\s*$/);
+      if(m){
+        const label = m[1].trim();
+        const rawVal = m[2].trim();
+        const unit = m[3].trim();
+        // 「－」は空値
+        const value = (rawVal==='－'||rawVal==='-') ? '' : rawVal;
+        curProp.fields.push({label, value, unit});
+      }
+      continue;
+    }
+  }
+  if(!date) throw new Error('日付が見つかりません。正しいテキストファイルか確認してください。');
+  if(props.length===0) throw new Error('物件データが見つかりません。');
+  return {date, staff, props};
+}
+
+function renderTxtPreview(parsed){
+  const tbl = document.getElementById('txtPreviewTable');
+  let html = `<div style="font-size:13px;margin-bottom:8px;color:#555">
+    📅 ${parsed.date}　👤 ${parsed.staff}　🏢 ${parsed.props.length}件
+  </div>`;
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<tr style="background:#e2e8f0"><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">物件名</th><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">項目</th><th style="padding:5px 8px;text-align:right;border:1px solid #cbd5e1">値</th><th style="padding:5px 8px;text-align:left;border:1px solid #cbd5e1">単位</th></tr>';
+  parsed.props.forEach(prop=>{
+    prop.fields.forEach((f, fi)=>{
+      html += `<tr style="background:${fi%2===0?'#fff':'#f8fafc'}">`;
+      html += fi===0 ? `<td rowspan="${prop.fields.length}" style="padding:5px 8px;border:1px solid #e2e8f0;font-weight:700;vertical-align:top">${prop.name}</td>` : '';
+      html += `<td style="padding:5px 8px;border:1px solid #e2e8f0">${f.label}</td>`;
+      html += `<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right">${f.value!==''?f.value:'－'}</td>`;
+      html += `<td style="padding:5px 8px;border:1px solid #e2e8f0">${f.unit}</td></tr>`;
+    });
+  });
+  html += '</table>';
+  tbl.innerHTML = html;
+}
+
+function convertTxtToXlsx(){
+  if(!_parsedTxt){ alert('テキストファイルを先に選択してください。'); return; }
+  const p = _parsedTxt;
+  const wb = XLSX.utils.book_new();
+  const rows = [['物件名','項目','値','単位','日付','担当者']];
+  p.props.forEach(prop=>{
+    prop.fields.forEach(f=>{
+      rows.push([prop.name, f.label, f.value!==''?parseFloat(f.value)||f.value:'', f.unit, p.date, p.staff]);
+    });
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:20},{wch:12},{wch:10},{wch:8},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, ws, '計量データ');
+  XLSX.writeFile(wb, `計量データ_${p.date.replace(/-/g,'')}_${p.staff}.xlsx`);
 }
 
 // ===== FIELD DROPDOWN =====
