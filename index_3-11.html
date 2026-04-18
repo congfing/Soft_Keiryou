@@ -162,7 +162,7 @@
   <div class="nav-tabs">
     <button class="nav-tab active" id="navDate" onclick="navTo(1)">📅 日付選択</button>
     <button class="nav-tab disabled" id="navStaff" onclick="navTo(2)">👤 担当者</button>
-    <button class="nav-tab disabled" id="navProps" onclick="navTo(3)">🏢 物件リスト</button>
+    <button class="nav-tab disabled" id="navProps" onclick="navTo(3)">🏢 物件リスト<span id="entryCountBadge" style="display:none;background:#22c55e;color:white;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:bold;margin-left:4px;vertical-align:middle"></span></button>
     <button class="nav-tab" id="navHistory" onclick="navTo(6)">📋 履歴</button>
     <button class="nav-tab" id="navSettings" onclick="navTo(0)">⚙️ 設定</button>
     <button class="nav-tab" id="navMail" onclick="navTo(7)">✉️ メール</button>
@@ -205,12 +205,8 @@
 <!-- Screen 3: Combined property list + inline settings -->
 <div class="screen" id="screen3">
   <div style="padding-top:16px">
-    <div class="section-title">🏢 物件リスト<span class="count-badge" id="propCount"></span><span id="entryCountBadge" style="display:none;background:#22c55e;color:white;border-radius:20px;padding:2px 10px;font-size:13px;font-weight:bold;margin-left:6px"></span></div>
+    <div class="section-title">🏢 物件リスト<span class="count-badge" id="propCount"></span></div>
     <div class="section-sub" id="screen3sub"></div>
-    <div id="saveOrderBanner" class="save-order-banner">
-      <span>💾 この入力順を来週用に保存しますか？</span>
-      <button class="btn btn-warning btn-sm" onclick="saveCurrentOrder()">保存</button>
-    </div>
     <div class="sort-hint" id="sortHint"></div>
     <div id="propertyList"></div>
     <div style="display:flex;gap:10px;margin-top:8px">
@@ -239,7 +235,6 @@
     <div class="section-title">✅ 確認・保存</div>
     <div class="section-sub" id="screen5sub"></div>
     <div id="summaryContent"></div>
-    <button class="btn btn-warning" onclick="saveCurrentOrder()" style="margin-bottom:10px">💾 この入力順を来週用に保存</button>
     <div style="display:flex;gap:10px;margin-bottom:10px">
       <button class="btn btn-success" style="flex:1" onclick="exportText()">📄 TEXT保存</button>
       <button class="btn btn-primary" style="flex:1" onclick="exportXlsx()">📥 Excel保存</button>
@@ -655,11 +650,9 @@ function getSortedProps(){
 function renderPropertyList(){
   const c=document.getElementById('propertyList'); c.innerHTML='';
   const hint=document.getElementById('sortHint');
-  const banner=document.getElementById('saveOrderBanner');
 
   let displayList;
   if(state.customOrder){
-    // Use drag-reordered list
     displayList=state.customOrder.map(n=>allProperties.find(p=>p.name===n)).filter(Boolean);
     const missing=allProperties.filter(p=>!state.customOrder.includes(p.name));
     displayList=[...displayList,...missing];
@@ -673,16 +666,12 @@ function renderPropertyList(){
   const hasSaved=!!getSavedOrder(state.selectedStaff,state.dayName);
   if(state.customOrder){
     hint.textContent='↕ ドラッグで並び替え中';
-    banner.style.display='none';
   } else if(state.entryOrder.length>0){
     hint.textContent='✅ 入力済みが上に並んでいます';
-    banner.style.display='flex';
   } else if(hasSaved){
     hint.textContent='📌 前回の入力順で表示中';
-    banner.style.display='none';
   } else {
     hint.textContent='番号順で表示中';
-    banner.style.display='none';
   }
 
   // Update entry count badge
